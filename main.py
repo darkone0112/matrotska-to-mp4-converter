@@ -4,6 +4,7 @@ from tkinter import filedialog
 import subprocess
 import json
 from functools import partial
+import threading
 
 def get_media_tracks(mkv_file_path):
     cmd = [
@@ -26,7 +27,7 @@ def get_media_tracks(mkv_file_path):
     
     return audio_tracks, subtitle_tracks
 
-def convert_file(mkv_file_path, audio_var, subtitle_var, preset_var):
+def convert_file(mkv_file_path, audio_var, subtitle_var, preset_var, feedback_text, progress_bar):
     audio_index = audio_var.get()
     subtitle_index = subtitle_var.get()
     preset_value = preset_var.get()
@@ -35,19 +36,28 @@ def convert_file(mkv_file_path, audio_var, subtitle_var, preset_var):
     cmd = [
         'ffmpeg',
         '-i', mkv_file_path,
-        '-map', '0:v:0',  # This is mapping the first video stream
-        '-map', f'0:{audio_index}',  # This is mapping the audio stream
-        '-map', f'0:{subtitle_index}',  # This is mapping the subtitle stream
-        '-c:v', 'copy',  # This is copying the video codec
-        '-c:a', 'aac',  # This is converting the audio to AAC
-        '-ac', '2',  # This is downmixing audio to stereo
-        '-c:s', 'mov_text',  # This is converting subtitles to mov_text
-        '-preset', preset_value,  # This is using the preset value for encoding
+        '-map', '0:v:0',
+        '-map', f'0:{audio_index}',
+        '-map', f'0:{subtitle_index}',
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-ac', '2',
+        '-c:s', 'mov_text',
+        '-preset', preset_value,
         mp4_file_path
     ]
-    subprocess.run(cmd)
 
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
 
+    progress_bar.start(10)  # This starts the indeterminate progress bar
+
+    for line in process.stdout:
+        feedback_text.insert(tk.END, line)
+        feedback_text.see(tk.END)
+
+    progress_bar.stop()
+    feedback_text.insert(tk.END, 'Conversion complete!')
+    feedback_text.see(tk.END)
 
 def open_file_dialog():
     file_path = filedialog.askopenfilename(title="Select MKV file", filetypes=[("MKV files", "*.mkv")])
@@ -56,35 +66,50 @@ def open_file_dialog():
 
     audio_tracks, subtitle_tracks = get_media_tracks(file_path)
 
-    new_window = tk.Toplevel(root)
-    new_window.title("Select Tracks")
-    
-    ttk.Label(new_window, text="Select an audio track:").pack()
+    for widget in root.winfo_children():
+        widget.destroy()
+
+    ttk.Label(root, text="Select an audio track:").pack()
     
     audio_var = tk.IntVar()
     for idx, lang in audio_tracks:
-        ttk.Radiobutton(new_window, text=f"Track {idx} - Language: {lang}", variable=audio_var, value=idx).pack()
+        ttk.Radiobutton(root, text=f"Track {idx} - Language: {lang}", variable=audio_var, value=idx).pack()
     
-    ttk.Label(new_window, text="Select a subtitle track:").pack()
+    ttk.Label(root, text="Select a subtitle track:").pack()
     
     subtitle_var = tk.IntVar()
     for idx, lang in subtitle_tracks:
-        ttk.Radiobutton(new_window, text=f"Track {idx} - Language: {lang}", variable=subtitle_var, value=idx).pack()
+        ttk.Radiobutton(root, text=f"Track {idx} - Language: {lang}", variable=subtitle_var, value=idx).pack()
 
-    # Adding a preset dropdown
-    preset_var = tk.StringVar(value='medium')  # Default value
-    ttk.Label(new_window, text="Select a preset:").pack()
-    ttk.OptionMenu(new_window, preset_var, 'ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow').pack()
+    preset_var = tk.StringVar(value='medium')
+    ttk.Label(root, text="Select a preset:").pack()
+    ttk.OptionMenu(root, preset_var, 'ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow').pack()
 
-    on_convert = partial(convert_file, file_path, audio_var, subtitle_var, preset_var)
-    
-    ttk.Button(new_window, text="Convert", command=on_convert).pack()
+    feedback_text = tk.Text(root, height=10, width=50)
+    feedback_text.pack()
 
+    progress_bar = ttk.Progressbar(root, mode='indeterminate')
+    progress_bar.pack()
+
+    on_convert = partial(
+        convert_file, file_path, audio_var, subtitle_var, preset_var, feedback_text, progress_bar
+    )
+
+    convert_button = ttk.Button(root, text="Convert", command=lambda: threading.Thread(target=on_convert).start())
+    convert_button.pack()
+
+    back_button = ttk.Button(root, text="Back", command=create_main_ui)
+    back_button.pack()
+
+def create_main_ui():
+    for widget in root.winfo_children():
+        widget.destroy()
+    open_button = ttk.Button(root, text="Open MKV File", command=open_file_dialog)
+    open_button.pack()
 
 root = tk.Tk()
 root.title("MKV to MP4 Converter")
 
-open_button = ttk.Button(root, text="Open MKV File", command=open_file_dialog)
-open_button.pack()
+create_main_ui()
 
 root.mainloop()
